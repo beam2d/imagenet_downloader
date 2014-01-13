@@ -75,8 +75,8 @@ def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=Fa
     def producer():
         with open(list_filename) as list_in:
             for line in list_in:
-                name, url = line.strip().split()
-                entries.put((name, url), block=True)
+                name, url = line.strip().split(None, 1)
+                entries.put((ret[0], ''.join(ret[1:])), block=True)
 
         entries.join()
         done[0] = True
@@ -89,9 +89,15 @@ def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=Fa
                 continue
 
             try:
+                if name is None:
+                    if verbose:
+                        sys.stdout.write('Error: Invalid line: ' + line)
+                    counts_fail[i] += 1
+                    continue
+
+                directory = os.path.join(out_dir, name.split('_')[0])
                 content = download(url, timeout)
                 ext = imgtype2ext(imghdr.what('', content))
-                directory = os.path.join(out_dir, name.split('_')[0])
                 try:
                     make_directory(directory)
                 except:
@@ -100,6 +106,7 @@ def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=Fa
                 with open(path, 'w') as f:
                     f.write(content)
                 counts_success[i] += 1
+
             except Exception as e:
                 counts_fail[i] += 1
                 if verbose:
