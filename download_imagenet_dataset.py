@@ -76,7 +76,7 @@ def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=Fa
         with open(list_filename) as list_in:
             for line in list_in:
                 name, url = line.strip().split(None, 1)
-                entries.put((ret[0], ''.join(ret[1:])), block=True)
+                entries.put((name, url), block=True)
 
         entries.join()
         done[0] = True
