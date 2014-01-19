@@ -23,19 +23,38 @@ import argparse
 import imghdr
 import Queue
 import os
+import socket
 import sys
 import tempfile
 import threading
 import time
 import urllib2
 
-def download(url, timeout):
+def download(url, timeout, retry, sleep):
     """Downloads a file at given URL."""
-    f = urllib2.urlopen(url, timeout=timeout)
-    if f is None:
-        raise Exception('Cannot open URL {0}'.format(url))
-    content = f.read()
-    f.close()
+    count = 0
+    while True:
+        try:
+            f = urllib2.urlopen(url, timeout=timeout)
+            if f is None:
+                raise Exception('Cannot open URL {0}'.format(url))
+            content = f.read()
+            f.close()
+            break
+        except urllib2.HTTPError as e:
+            if 500 <= e.code < 600:
+                count += 1
+                if count > retry:
+                    raise
+        except urllib2.URLError as e:
+            if isinstance(e.reason, socket.gaierror):
+                count += 1
+                time.sleep(sleep)
+                if count > retry:
+                    raise
+            else:
+                raise
+
     return content
 
 def imgtype2ext(typ):
@@ -50,7 +69,13 @@ def make_directory(path):
     if not os.path.isdir(path):
         os.makedirs(path)
 
-def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=False):
+def download_imagenet(list_filename,
+                      out_dir,
+                      timeout=10,
+                      retry=10,
+                      num_jobs=1,
+                      sleep_after_dl=1,
+                      verbose=False):
     """Downloads to out_dir all images whose names and URLs are written in file
     of name list_filename.
     """
@@ -91,12 +116,12 @@ def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=Fa
             try:
                 if name is None:
                     if verbose:
-                        sys.stdout.write('Error: Invalid line: ' + line)
+                        sys.stderr.write('Error: Invalid line: ' + line)
                     counts_fail[i] += 1
                     continue
 
                 directory = os.path.join(out_dir, name.split('_')[0])
-                content = download(url, timeout)
+                content = download(url, timeout, retry, sleep_after_dl)
                 ext = imgtype2ext(imghdr.what('', content))
                 try:
                     make_directory(directory)
@@ -106,11 +131,12 @@ def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=Fa
                 with open(path, 'w') as f:
                     f.write(content)
                 counts_success[i] += 1
+                time.sleep(sleep_after_dl)
 
             except Exception as e:
                 counts_fail[i] += 1
                 if verbose:
-                    sys.stdout.write('Error: {0}: {1}\n'.format(name, e))
+                    sys.stderr.write('Error: {0}: {1}\n'.format(name, e))
 
             entries.task_done()
 
@@ -132,7 +158,7 @@ def download_imagenet(list_filename, out_dir, timeout=10, num_jobs=1, verbose=Fa
                 '{0} / {1} ({2}%) done, {3} / {0} ({4}%) succeeded                    {5}'.format(
                     count, count_total, rate_done, count_success, rate_success, delim))
 
-            time.sleep(2)
+            time.sleep(1)
         sys.stderr.write('done')
 
     producer_thread = threading.Thread(target=producer)
@@ -166,10 +192,14 @@ if __name__ == '__main__':
                    help='Number of parallel threads to download')
     p.add_argument('--timeout', '-t', type=int, default=10,
                    help='Timeout per image in seconds')
+    p.add_argument('--retry', '-r', type=int, default=10,
+                   help='Max count of retry for each image')
+    p.add_argument('--sleep', '-s', type=float, default=1,
+                   help='Sleep after download each image in second')
     p.add_argument('--verbose', '-v', action='store_true',
                    help='Enable verbose messages')
     args = p.parse_args()
 
     download_imagenet(args.list, args.outdir,
-                      timeout=args.timeout, num_jobs=args.jobs,
-                      verbose=args.verbose)
+                      timeout=args.timeout, retry=args.retry,
+                      num_jobs=args.jobs, verbose=args.verbose)
